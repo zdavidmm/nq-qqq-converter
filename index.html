@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NQ1 → QQQ Converter</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: #0d1117;
+    color: #e6edf3;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 2rem 1rem;
+  }
+  h1 {
+    font-size: 1.8rem;
+    margin-bottom: 0.3rem;
+    color: #58a6ff;
+  }
+  .subtitle {
+    color: #8b949e;
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+  }
+  .card {
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 12px;
+    padding: 1.5rem 2rem;
+    width: 100%;
+    max-width: 480px;
+    margin-bottom: 1.2rem;
+  }
+  .card-title {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: #8b949e;
+    margin-bottom: 0.8rem;
+  }
+  .price-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 0.5rem;
+  }
+  .price-label {
+    font-size: 1rem;
+    color: #c9d1d9;
+  }
+  .price-value {
+    font-size: 1.4rem;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+  }
+  .price-value.loading {
+    color: #484f58;
+    font-size: 1rem;
+  }
+  .highlight {
+    color: #3fb950;
+  }
+  .ratio-value {
+    font-size: 1.1rem;
+    color: #d2a8ff;
+    font-weight: 600;
+  }
+  .converted {
+    font-size: 1.8rem;
+    color: #ffa657;
+    font-weight: 800;
+  }
+  .sma-section {
+    text-align: center;
+  }
+  .sma-question {
+    font-size: 0.95rem;
+    color: #c9d1d9;
+    margin-bottom: 0.8rem;
+    line-height: 1.4;
+  }
+  .sma-answer {
+    font-size: 2rem;
+    font-weight: 800;
+  }
+  .sma-answer.true { color: #f85149; }
+  .sma-answer.false { color: #3fb950; }
+  .sma-details {
+    margin-top: 0.8rem;
+    font-size: 0.85rem;
+    color: #8b949e;
+    line-height: 1.5;
+  }
+  .status-bar {
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+    color: #484f58;
+    text-align: center;
+  }
+  .error {
+    color: #f85149;
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+  }
+  @media (max-width: 500px) {
+    .card { padding: 1.2rem; }
+    .converted { font-size: 1.5rem; }
+  }
+</style>
+</head>
+<body>
+<h1>NQ1 → QQQ Converter</h1>
+<p class="subtitle">Live Nasdaq futures to QQQ ETF conversion</p>
+
+<div class="card">
+  <div class="card-title">Live Prices</div>
+  <div class="price-row">
+    <span class="price-label">NQ=F (E-mini Nasdaq)</span>
+    <span class="price-value loading" id="nq-price">Loading…</span>
+  </div>
+  <div class="price-row">
+    <span class="price-label">QQQ (ETF)</span>
+    <span class="price-value loading" id="qqq-price">Loading…</span>
+  </div>
+  <div class="price-row" style="margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #30363d;">
+    <span class="price-label">Ratio (NQ / QQQ)</span>
+    <span class="ratio-value" id="ratio">—</span>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Converted QQQ Estimate</div>
+  <div style="text-align: center;">
+    <span class="converted" id="converted">—</span>
+  </div>
+  <div id="error-msg" class="error" style="text-align:center;"></div>
+</div>
+
+<div class="card">
+  <div class="card-title">Stan Weinstein 30-Week SMA</div>
+  <div class="sma-section">
+    <div class="sma-question">Did the last week of QQQ close below the 30‑week SMA?</div>
+    <div class="sma-answer" id="sma-answer">—</div>
+    <div class="sma-details" id="sma-details"></div>
+  </div>
+</div>
+
+<div class="status-bar" id="status">Connecting…</div>
+
+<script>
+const PROXIES = [
+  url => 'https://corsproxy.io/?' + encodeURIComponent(url),
+  url => 'https://api.allorigins.win/raw?url=' + encodeURIComponent(url),
+];
+
+const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart/';
+
+async function fetchWithProxy(url) {
+  for (const makeProxy of PROXIES) {
+    try {
+      const res = await fetch(makeProxy(url));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } catch (e) {
+      continue;
+    }
+  }
+  throw new Error('All proxies failed');
+}
+
+function parsePrice(data) {
+  const meta = data.chart.result[0].meta;
+  return meta.regularMarketPrice;
+}
+
+const $nq = document.getElementById('nq-price');
+const $qqq = document.getElementById('qqq-price');
+const $ratio = document.getElementById('ratio');
+const $converted = document.getElementById('converted');
+const $error = document.getElementById('error-msg');
+const $status = document.getElementById('status');
+const $smaAnswer = document.getElementById('sma-answer');
+const $smaDetails = document.getElementById('sma-details');
+
+let lastRatio = null;
+
+async function fetchPrices() {
+  $error.textContent = '';
+  try {
+    const [nqData, qqqData] = await Promise.all([
+      fetchWithProxy(YAHOO_CHART + 'NQ=F'),
+      fetchWithProxy(YAHOO_CHART + 'QQQ'),
+    ]);
+
+    const nqPrice = parsePrice(nqData);
+    const qqqPrice = parsePrice(qqqData);
+    const ratio = nqPrice / qqqPrice;
+    lastRatio = ratio;
+    const convertedPrice = nqPrice / ratio;
+
+    $nq.textContent = nqPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    $nq.classList.remove('loading');
+    $nq.classList.add('highlight');
+
+    $qqq.textContent = '$' + qqqPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    $qqq.classList.remove('loading');
+
+    $ratio.textContent = ratio.toFixed(4);
+    $converted.textContent = '$' + convertedPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+    const now = new Date();
+    $status.textContent = 'Last updated: ' + now.toLocaleTimeString() + ' · Refreshing every 10s';
+  } catch (e) {
+    $error.textContent = 'Failed to fetch prices: ' + e.message;
+    $status.textContent = 'Error · Will retry in 10s';
+  }
+}
+
+async function fetchSMA() {
+  try {
+    // Fetch ~1 year of weekly data (need 30+ weeks)
+    const data = await fetchWithProxy(YAHOO_CHART + 'QQQ?interval=1wk&range=1y');
+    const result = data.chart.result[0];
+    const closes = result.indicators.quote[0].close.filter(c => c != null);
+
+    if (closes.length < 31) {
+      $smaAnswer.textContent = 'N/A';
+      $smaDetails.textContent = 'Not enough weekly data (need 30+ weeks).';
+      return;
+    }
+
+    // Last completed week's close (second to last, since last may be incomplete)
+    const lastClose = closes[closes.length - 2];
+    // 30-week SMA: average of the 30 closes ending at the last completed week
+    const smaSlice = closes.slice(closes.length - 31, closes.length - 1);
+    const sma30 = smaSlice.reduce((a, b) => a + b, 0) / smaSlice.length;
+    const belowSMA = lastClose < sma30;
+
+    $smaAnswer.textContent = belowSMA ? 'True' : 'False';
+    $smaAnswer.className = 'sma-answer ' + (belowSMA ? 'true' : 'false');
+    $smaDetails.textContent =
+      'Last week close: $' + lastClose.toFixed(2) +
+      ' · 30-week SMA: $' + sma30.toFixed(2);
+  } catch (e) {
+    $smaAnswer.textContent = 'Error';
+    $smaDetails.textContent = e.message;
+  }
+}
+
+// Initial load — both in parallel
+fetchPrices();
+fetchSMA();
+
+// Auto-refresh prices every 10s (SMA only needs once)
+setInterval(fetchPrices, 10000);
+</script>
+</body>
+</html>
