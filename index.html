@@ -221,11 +221,9 @@ async function fetchPrices() {
     $ratio.textContent = ratio.toFixed(4);
     $converted.textContent = '$' + convertedPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-    const now = new Date();
-    $status.textContent = 'Last updated: ' + now.toLocaleTimeString() + ' · Refreshing every 10s';
+    lastUpdateTime = new Date();
   } catch (e) {
     $error.textContent = 'Failed to fetch prices: ' + e.message;
-    $status.textContent = 'Error · Will retry in 10s';
   }
 }
 
@@ -260,12 +258,31 @@ async function fetchSMA() {
   }
 }
 
-// Initial load — both in parallel
+const REFRESH_INTERVAL = 10;
+let lastUpdateTime = null;
+let countdown = REFRESH_INTERVAL;
+
+function updateStatus() {
+  if (lastUpdateTime) {
+    $status.textContent = 'Last updated: ' + lastUpdateTime.toLocaleTimeString() + ' · Refresh in ' + countdown + 's';
+  } else {
+    $status.textContent = 'Connecting… · Refresh in ' + countdown + 's';
+  }
+}
+
+// Tick every second: update countdown, fetch when it hits 0
+setInterval(() => {
+  countdown--;
+  if (countdown <= 0) {
+    countdown = REFRESH_INTERVAL;
+    fetchPrices();
+  }
+  updateStatus();
+}, 1000);
+
+// Initial load
 fetchPrices();
 fetchSMA();
-
-// Auto-refresh prices every 10s (SMA only needs once)
-setInterval(fetchPrices, 10000);
 </script>
 </body>
 </html>
