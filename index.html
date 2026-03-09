@@ -160,9 +160,11 @@ const PROXIES = [
 const YAHOO_CHART = 'https://query1.finance.yahoo.com/v8/finance/chart/';
 
 async function fetchWithProxy(url) {
+  // Cache-bust to prevent CORS proxy from serving stale data
+  const bustUrl = url + (url.includes('?') ? '&' : '?') + '_t=' + Date.now();
   for (const makeProxy of PROXIES) {
     try {
-      const res = await fetch(makeProxy(url));
+      const res = await fetch(makeProxy(bustUrl), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (e) {
