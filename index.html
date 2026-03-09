@@ -127,7 +127,7 @@
     <span class="price-value loading" id="qqq-price">Loading…</span>
   </div>
   <div class="price-row" style="margin-top: 0.6rem; padding-top: 0.6rem; border-top: 1px solid #30363d;">
-    <span class="price-label">Ratio (NQ / QQQ)</span>
+    <span class="price-label">Ratio (prev close)</span>
     <span class="ratio-value" id="ratio">—</span>
   </div>
 </div>
@@ -172,9 +172,12 @@ async function fetchWithProxy(url) {
   throw new Error('All proxies failed');
 }
 
-function parsePrice(data) {
+function parsePrices(data) {
   const meta = data.chart.result[0].meta;
-  return meta.regularMarketPrice;
+  return {
+    live: meta.regularMarketPrice,
+    prevClose: meta.chartPreviousClose ?? meta.previousClose ?? meta.regularMarketPrice,
+  };
 }
 
 const $nq = document.getElementById('nq-price');
@@ -196,17 +199,21 @@ async function fetchPrices() {
       fetchWithProxy(YAHOO_CHART + 'QQQ'),
     ]);
 
-    const nqPrice = parsePrice(nqData);
-    const qqqPrice = parsePrice(qqqData);
-    const ratio = nqPrice / qqqPrice;
-    lastRatio = ratio;
-    const convertedPrice = nqPrice / ratio;
+    const nq = parsePrices(nqData);
+    const qqq = parsePrices(qqqData);
 
-    $nq.textContent = nqPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    // Ratio from previous close (last time both traded simultaneously)
+    const ratio = nq.prevClose / qqq.prevClose;
+    lastRatio = ratio;
+
+    // Estimate QQQ from live NQ futures price using the close-based ratio
+    const convertedPrice = nq.live / ratio;
+
+    $nq.textContent = nq.live.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     $nq.classList.remove('loading');
     $nq.classList.add('highlight');
 
-    $qqq.textContent = '$' + qqqPrice.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    $qqq.textContent = '$' + qqq.live.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
     $qqq.classList.remove('loading');
 
     $ratio.textContent = ratio.toFixed(4);
